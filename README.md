@@ -69,6 +69,7 @@ EDINETの `docTypeCode` は訂正版ごとに個別のコードが振られて�
 ```bash
 python src/classify_amendments.py --limit 10
 python src/classify_amendments.py --limit 10 --model qwen3-14b
+python src/classify_amendments.py --limit 10 --no-pdf   # PDF本文を読まず、書類概要のみで分類(旧方式)
 ```
 
 - 入力: `data/edinet.db` の `amended_documents`
@@ -78,16 +79,23 @@ python src/classify_amendments.py --limit 10 --model qwen3-14b
   - `reason`: 分類理由の一言
 - 判断がつかない場合は安全側("重要")に倒す設計
 
-### 既知の限界
+### PDF本文の取得と抽出
 
-`docDescription`(書類概要)は「訂正有価証券届出書（内国投資信託受益証券）」のような定型タイトルのみで、
-訂正内容の詳細が書かれていないことが多い。そのため現状は大半が"重要"判定になりやすい。
-件数を拡大する前に、書類本文(XBRL/PDF)まで読ませる、または"要確認"ラベルを追加するなどの改善を検討中。
+`docDescription`(書類概要)だけでは「訂正有価証券届出書（内国投資信託受益証券）」のような定型タイトルしか
+分からず、訂正内容の詳細が書かれていない。そこでEDINETの書類取得API(`type=2`, PDF)から本文を取得し、
+「【○○の提出理由】」のような角括弧見出しを検出して、その周辺(訂正前後の数値対比表を含む)を抜粋してLLMに渡す。
+
+- PDFは `data/documents/{docID}.pdf` にキャッシュ(再実行時は再取得しない、`.gitignore`対象)
+- 見出しが見つからない場合は先頭3000文字にフォールバック(短い書類は元々全文がこの範囲に収まる)
+- 出力CSVの `bodyExcerptPreview` 列で、実際にどのテキストを根拠に分類したか確認できる
+
+10件サンプルでの検証結果: 軽微11件・重要6件と、書類概要のみの分類(全件"重要")より大幅に精度が向上。
+自己資本比率の数値訂正やリース取引の金額修正など、具体的な数値変更を伴う理由も正しく抽出・分類できている。
 
 ## 今後の拡張(ロードマップ)
 
 - Phase 1: 収集・一次スクリーニング(EDINET訂正報告書の日次取得) ← 完了
-- Phase 2: 軽量LLMによる訂正理由の一次分類 ← 進行中(10件サンプルで検証済み)
+- Phase 2: ローカルLLM(Qwen3, LM Studio)による訂正理由の一次分類(PDF本文抜粋ベース) ← 完了(10件で検証済み、101件への拡大待ち)
 - Phase 3: 監査基準・過去事例のRAG
 - Phase 4: kabu-dashboardへの統合
 - Phase 5: マルチエージェント協働

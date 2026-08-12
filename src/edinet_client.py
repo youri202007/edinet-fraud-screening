@@ -9,6 +9,10 @@ from typing import Any
 import requests
 
 BASE_URL = "https://api.edinet-fsa.go.jp/api/v2/documents.json"
+DOCUMENT_URL = "https://api.edinet-fsa.go.jp/api/v2/documents/{doc_id}"
+
+# type: 1=XBRL, 2=PDF, 3=代替書面・添付文書, 4=英文, 5=CSV
+DOC_TYPE_PDF = 2
 
 
 class EdinetApiError(RuntimeError):
@@ -63,3 +67,19 @@ def fetch_documents_for_range(
         if current <= end_date:
             time.sleep(sleep_seconds)
     return all_results
+
+
+def fetch_document_pdf(doc_id: str, *, timeout: float = 30.0) -> bytes:
+    """指定書類のPDF本文(バイナリ)を取得する。"""
+    params = {"type": DOC_TYPE_PDF, "Subscription-Key": _api_key()}
+    url = DOCUMENT_URL.format(doc_id=doc_id)
+    res = requests.get(url, params=params, timeout=timeout)
+    res.raise_for_status()
+
+    content_type = res.headers.get("Content-Type", "")
+    if "pdf" not in content_type.lower():
+        raise EdinetApiError(
+            f"{doc_id}: PDFが取得できませんでした(Content-Type: {content_type})。"
+            "書類がPDF非対応(縦覧終了・様式外 等)の可能性があります。"
+        )
+    return res.content

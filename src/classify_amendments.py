@@ -17,11 +17,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from dotenv import load_dotenv
+
+from doc_text import extract_reason_excerpt
+from edinet_client import EdinetApiError, fetch_document_pdf
 from llm_client import DEFAULT_BASE_URL, LmStudioError, classify_amendment
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "data" / "edinet.db"
 DEFAULT_OUT = ROOT / "data" / "classified_amendments.csv"
+PDF_CACHE_DIR = ROOT / "data" / "documents"
+
+EXCERPT_PREVIEW_CHARS = 300  # CSVに保存する抜粋の長さ(全文はキャッシュPDFに残る)
 
 OUT_FIELDS = [
     "docID",
@@ -30,6 +37,8 @@ OUT_FIELDS = [
     "docDescription",
     "importance",
     "reason",
+    "sourceType",
+    "bodyExcerptPreview",
     "classifiedAt",
     "model",
 ]
@@ -67,6 +76,24 @@ def append_results(out_path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def get_body_excerpt(doc_id: str) -> tuple[str, str]:
+    """PDF本文から訂正理由の抜粋を取得する。取得失敗時は ("", "description_only") を返す。
+
+    ダウンロード済みPDFは data/documents/ にキャッシュし、再実行時の再取得を避ける。
+    """
+    PDF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    pdf_path = PDF_CACHE_DIR / f"{doc_id}.pdf"
+
+    if pdf_path.exists():
+        pdf_bytes = pdf_path.read_bytes()
+    else:
+        pdf_bytes = fetch_document_pdf(doc_id)
+        pdf_path.write_bytes(pdf_bytes)
+
+    excerpt = extract_reason_excerpt(pdf_bytes)
+    return excerpt, "pdf"
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=10, help="分類する件数(デフォルト10)")
@@ -74,10 +101,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", type=str, default=str(DEFAULT_OUT), help="出力CSVパス")
     parser.add_argument("--model", type=str, default="qwen3-14b", help="LM Studioのモデルid")
     parser.add_argument("--base-url", type=str, default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--no-pdf",
+        action="store_true",
+        help="PDF本文を取得せず、docDescriptionのみで分類する(旧Phase2互換)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
     args = parse_args(argv)
     db_path = Path(args.db)
     out_path = Path(args.out)
@@ -99,9 +132,18 @@ def main(argv: list[str] | None = None) -> int:
     for i, doc in enumerate(candidates, start=1):
         desc = doc["docDescription"] or ""
         print(f"  ({i}/{len(candidates)}) {doc['docID']} {doc['filerName']}: {desc[:40]}")
+
+        body_excerpt, source_type = "", "description_only"
+        if not args.no_pdf:
+            try:
+                body_excerpt, source_type = get_body_excerpt(doc["docID"])
+                print(f"    [pdf] 抜粋 {len(body_excerpt)} 文字取得")
+            except (EdinetApiError, Exception) as e:  # noqa: BLE001
+                print(f"    [warn] PDF取得/抽出失敗、書類概要のみで分類します: {e}", file=sys.stderr)
+
         try:
             classification = classify_amendment(
-                desc, model=args.model, base_url=args.base_url
+                desc, model=args.model, body_excerpt=body_excerpt, base_url=args.base_url
             )
         except (LmStudioError, Exception) as e:  # noqa: BLE001
             print(f"    [warn] 分類失敗、スキップ: {e}", file=sys.stderr)
@@ -115,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
                 "docDescription": desc,
                 "importance": classification["importance"],
                 "reason": classification["reason"],
+                "sourceType": source_type,
+                "bodyExcerptPreview": body_excerpt[:EXCERPT_PREVIEW_CHARS],
                 "classifiedAt": dt.datetime.now().isoformat(timespec="seconds"),
                 "model": args.model,
             }
