@@ -106,6 +106,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="PDF本文を取得せず、docDescriptionのみで分類する(旧Phase2互換)",
     )
+    parser.add_argument(
+        "--thinking",
+        action="store_true",
+        help="Qwen3の思考モードを有効にする(デフォルトは非思考モード。"
+        "検証の結果、精度はほぼ同等で速度が約3.7倍のため非思考をデフォルトにしている)",
+    )
     return parser.parse_args(argv)
 
 
@@ -143,7 +149,11 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             classification = classify_amendment(
-                desc, model=args.model, body_excerpt=body_excerpt, base_url=args.base_url
+                desc,
+                model=args.model,
+                body_excerpt=body_excerpt,
+                base_url=args.base_url,
+                enable_thinking=args.thinking,
             )
         except (LmStudioError, Exception) as e:  # noqa: BLE001
             print(f"    [warn] 分類失敗、スキップ: {e}", file=sys.stderr)
@@ -163,7 +173,10 @@ def main(argv: list[str] | None = None) -> int:
                 "model": args.model,
             }
         )
-        print(f"    -> {classification['importance']} / {classification['reason']}")
+        print(
+            f"    -> {classification['importance']} / {classification['reason']} "
+            f"({classification['elapsedSeconds']}s)"
+        )
 
     if not results:
         print("[info] 分類できた件数が0件でした。")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 import requests
@@ -48,9 +49,14 @@ def classify_amendment(
     body_excerpt: str = "",
     base_url: str = DEFAULT_BASE_URL,
     timeout: float = 120.0,
-) -> dict[str, str]:
-    """docDescription(+本文抜粋があればそれも)を分類し、{"importance": ..., "reason": ...} を返す。"""
+    enable_thinking: bool = True,
+) -> dict[str, Any]:
+    """docDescription(+本文抜粋があればそれも)を分類し、{"importance": ..., "reason": ..., "elapsedSeconds": ...} を返す。"""
     user_content = f"【書類概要】\n{doc_description or '(なし)'}\n\n【本文抜粋】\n{body_excerpt or '(取得できませんでした)'}"
+    if not enable_thinking:
+        # Qwen3の慣例: ユーザーターム末尾に /no_think を付けると思考ブロックを省略する
+        user_content += "\n\n/no_think"
+
     payload = {
         "model": model,
         "messages": [
@@ -60,7 +66,9 @@ def classify_amendment(
         "temperature": 0.1,
         "max_tokens": 2000,
     }
+    start = time.monotonic()
     res = requests.post(f"{base_url}/chat/completions", json=payload, timeout=timeout)
+    elapsed = time.monotonic() - start
     res.raise_for_status()
     body = res.json()
     content = body["choices"][0]["message"]["content"]
@@ -72,4 +80,4 @@ def classify_amendment(
     if importance not in ("重要", "軽微"):
         raise LmStudioError(f"想定外のimportance値: {importance!r} (raw: {content!r})")
 
-    return {"importance": importance, "reason": reason}
+    return {"importance": importance, "reason": reason, "elapsedSeconds": round(elapsed, 1)}
