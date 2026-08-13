@@ -122,10 +122,77 @@ python src/classify_amendments.py --limit 10 --thinking    # 思考モード
 今回収集した101件の週次サンプルには同種の重大事案は含まれていなかったが、
 パイプラインが実際の不正会計ケースを正しく拾えることは確認できている。
 
+## Phase 3: 監査基準・過去事例のRAG
+
+完全ローカル・外部API課金なしで、事例照会(軸A・自動連動)と実務相談(軸B・Web UI)の2種類のRAGを構築。
+LLM/埋め込みモデルの呼び出しは `config/config.json` で切り替え可能(現状はLM Studioのみ対応)。
+
+### 構成
+
+```
+config/config.json          # LLM/埋め込み/Chromaの設定(プロバイダ切替はここ)
+config/jicpa_sources.json   # JICPA監基報等の書誌情報(番号・タイトル・URL)
+src/app_config.py           # config.json読み込み
+src/llm_provider.py         # chat_complete/embed_textsの共通クライアント
+src/vector_store.py         # ChromaDBラッパー
+src/download_jicpa_standards.py  # JICPA監基報PDFのダウンロード
+src/ingest_cases.py         # classified_amendments.csv → ChromaDB(事例コレクション)
+src/ingest_standards.py     # JICPA監基報PDF → ChromaDB(基準コレクション)
+src/find_similar_cases.py   # 軸A: 新規取得分の類似事例をログに残す
+src/rag_answer.py           # 軸B: 質問の意図判定・回答生成ロジック
+src/rag_app.py              # 軸B: Streamlit UI
+```
+
+PDF本文・ベクトルDBの実体(`data/knowledge_base/`, `data/chroma/`, `data/logs/`)はいずれもgitignore対象。
+JICPA監基報は著作物のため、書誌情報のみをコミットし本文はローカル保存に留めている。
+
+### セットアップ
+
+1. [JICPA監査実務指針等一覧](https://jicpa.or.jp/specialized_field/publication/kansa/)から監基報等45件を取得
+   ```bash
+   python src/download_jicpa_standards.py
+   ```
+2. LM Studioで埋め込みモデル(`text-embedding-nomic-embed-text-v1.5`)をロードし、サーバーを起動
+3. ChromaDBに事例・基準を投入
+   ```bash
+   python src/ingest_cases.py       # Phase2の分類結果101件
+   python src/ingest_standards.py   # 監基報45件・2474チャンク
+   ```
+
+### 軸A: 事例照会(Phase1と自動連動、UI不要)
+
+`fetch_documents.py`の出力(`data/amendments_*.csv`)を対象に、ChromaDBの過去事例から類似事例を検索し、
+`data/logs/similar_cases_<日付>.md`(人間可読)と`.csv`(集計用)にログを残す。
+
+```bash
+python src/fetch_documents.py --days 7
+python src/find_similar_cases.py   # 最新のamendments_*.csvを自動検出
+```
+
+### 軸B: 実務相談(ローカルWeb UI)
+
+```bash
+streamlit run src/rag_app.py
+```
+
+質問を1つのフォームに入力すると、LLMが「過去事例照会」か「実務手続の相談」かを自動判定し、
+- 事例照会 → ChromaDBの事例コレクションから類似事例を提示
+- 実務相談 → 関連する監基報の抜粋を検索し、出典(基準名)を明示した参照形式で回答を生成
+  (「〜すべき」という断定は避け、最終判断は利用者に委ねる設計)
+
+いずれもLM Studio上のQwen3のみで完結し、外部API呼び出しは発生しない。
+
+### 動作確認結果
+
+- 軸A: 週次サンプル104件全件で類似事例3件ずつを検索し、ログ出力を確認(同一ファンドの定型訂正が距離0.09〜0.19で正しく近傍にヒット)
+- 軸B: ブラウザで実際にUIを操作し、以下2パターンの動作を確認
+  - 「サンプリングで逸脱が見つかった場合、サンプル数を拡大すべきか」→ 監基報530を出典明記の上で参照形式回答
+  - 「三菱UFJアセットマネジメントの投資信託でよくある訂正理由は？」→ 事例照会として類似事例を提示
+
 ## 今後の拡張(ロードマップ)
 
 - Phase 1: 収集・一次スクリーニング(EDINET訂正報告書の日次取得) ← 完了
 - Phase 2: ローカルLLM(Qwen3, LM Studio)による訂正理由の一次分類(PDF本文抜粋ベース) ← 完了(101件全件、軽微65件・重要36件、失敗0件)
-- Phase 3: 監査基準・過去事例のRAG
+- Phase 3: 監査基準・過去事例のRAG ← 完了(軸A・軸Bともに動作確認済み)
 - Phase 4: kabu-dashboardへの統合
 - Phase 5: マルチエージェント協働
