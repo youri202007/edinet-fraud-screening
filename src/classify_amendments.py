@@ -19,9 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dotenv import load_dotenv
 
+from app_config import load_config
 from doc_text import extract_reason_excerpt
 from edinet_client import EdinetApiError, fetch_document_pdf
-from llm_client import DEFAULT_BASE_URL, LmStudioError, classify_amendment
+from llm_client import LmStudioError, classify_amendment
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "data" / "edinet.db"
@@ -94,13 +95,15 @@ def get_body_excerpt(doc_id: str) -> tuple[str, str]:
     return excerpt, "pdf"
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None, *, default_model: str, default_base_url: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=10, help="分類する件数(デフォルト10)")
     parser.add_argument("--db", type=str, default=str(DEFAULT_DB), help="入力SQLiteパス")
     parser.add_argument("--out", type=str, default=str(DEFAULT_OUT), help="出力CSVパス")
-    parser.add_argument("--model", type=str, default="qwen3-14b", help="LM Studioのモデルid")
-    parser.add_argument("--base-url", type=str, default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--model", type=str, default=default_model, help="LM Studioのモデルid(デフォルトはconfig/config.json)"
+    )
+    parser.add_argument("--base-url", type=str, default=default_base_url)
     parser.add_argument(
         "--no-pdf",
         action="store_true",
@@ -109,15 +112,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--thinking",
         action="store_true",
-        help="Qwen3の思考モードを有効にする(デフォルトは非思考モード。"
-        "検証の結果、精度はほぼ同等で速度が約3.7倍のため非思考をデフォルトにしている)",
+        help="Qwen3の思考モードを有効にする(デフォルトはconfig/config.jsonのenable_thinking。"
+        "検証の結果、非思考でも精度はほぼ同等で速度が約3.7倍)",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    app_config = load_config()
     load_dotenv()
-    args = parse_args(argv)
+    args = parse_args(
+        argv, default_model=app_config.llm.model, default_base_url=app_config.llm.base_url
+    )
+    thinking = args.thinking or app_config.llm.enable_thinking
     db_path = Path(args.db)
     out_path = Path(args.out)
 
@@ -153,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                 model=args.model,
                 body_excerpt=body_excerpt,
                 base_url=args.base_url,
-                enable_thinking=args.thinking,
+                enable_thinking=thinking,
             )
         except (LmStudioError, Exception) as e:  # noqa: BLE001
             print(f"    [warn] 分類失敗、スキップ: {e}", file=sys.stderr)

@@ -1,0 +1,19 @@
+{
+  "_comment": "LLM/埋め込みモデルの呼び出し先設定。将来、別プロバイダ(vLLM/Ollama/クラウドAPI等)に切り替える場合はここを変更するだけでよい構成にしている。",
+  "llm": {
+    "provider": "lmstudio",
+    "base_url": "http://localhost:1234/v1",
+    "model": "qwen3-14b",
+    "enable_thinking": false
+  },
+  "embedding": {
+    "provider": "lmstudio",
+    "base_url": "http://localhost:1234/v1",
+    "model": "text-embedding-nomic-embed-text-v1.5"
+  },
+  "chroma": {
+    "persist_dir": "data/chroma",
+    "cases_collection": "amendment_cases",
+    "standards_collection": "jicpa_standards"
+  }
+}

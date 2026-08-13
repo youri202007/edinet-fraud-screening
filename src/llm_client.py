@@ -1,14 +1,17 @@
-"""LM Studioのローカルサーバー(OpenAI互換API)への薄いクライアント。"""
+"""訂正報告書の重要度分類に特化したプロンプトとロジック。LLM呼び出し自体は llm_provider に委譲する。"""
 from __future__ import annotations
 
 import json
 import re
-import time
 from typing import Any
 
-import requests
+from app_config import LlmConfig
+from llm_provider import LlmError, chat_complete
 
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
+
+# 後方互換のため、他モジュールからの `from llm_client import LmStudioError` を維持する
+LmStudioError = LlmError
 
 SYSTEM_PROMPT = """あなたは有価証券報告書等の訂正報告書を一次スクリーニングするアシスタントです。
 入力される「書類概要」と「訂正理由に関する本文抜粋」を根拠に、以下2軸で分類してください。
@@ -26,19 +29,10 @@ SYSTEM_PROMPT = """あなたは有価証券報告書等の訂正報告書を一�
 """
 
 
-class LmStudioError(RuntimeError):
-    pass
-
-
-def _strip_think_tags(text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-
-
 def _extract_json(text: str) -> dict[str, Any]:
-    cleaned = _strip_think_tags(text)
-    match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
-        raise LmStudioError(f"モデル出力からJSONを抽出できませんでした: {text!r}")
+        raise LlmError(f"モデル出力からJSONを抽出できませんでした: {text!r}")
     return json.loads(match.group(0))
 
 
@@ -48,36 +42,27 @@ def classify_amendment(
     model: str,
     body_excerpt: str = "",
     base_url: str = DEFAULT_BASE_URL,
-    timeout: float = 120.0,
     enable_thinking: bool = True,
 ) -> dict[str, Any]:
     """docDescription(+本文抜粋があればそれも)を分類し、{"importance": ..., "reason": ..., "elapsedSeconds": ...} を返す。"""
     user_content = f"【書類概要】\n{doc_description or '(なし)'}\n\n【本文抜粋】\n{body_excerpt or '(取得できませんでした)'}"
-    if not enable_thinking:
-        # Qwen3の慣例: ユーザーターム末尾に /no_think を付けると思考ブロックを省略する
-        user_content += "\n\n/no_think"
 
-    payload = {
-        "model": model,
-        "messages": [
+    config = LlmConfig(
+        provider="lmstudio", base_url=base_url, model=model, enable_thinking=enable_thinking
+    )
+    result = chat_complete(
+        [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ],
-        "temperature": 0.1,
-        "max_tokens": 2000,
-    }
-    start = time.monotonic()
-    res = requests.post(f"{base_url}/chat/completions", json=payload, timeout=timeout)
-    elapsed = time.monotonic() - start
-    res.raise_for_status()
-    body = res.json()
-    content = body["choices"][0]["message"]["content"]
+        config=config,
+    )
 
-    result = _extract_json(content)
-    importance = str(result.get("importance", "")).strip()
-    reason = str(result.get("reason", "")).strip()
+    parsed = _extract_json(result["content"])
+    importance = str(parsed.get("importance", "")).strip()
+    reason = str(parsed.get("reason", "")).strip()
 
     if importance not in ("重要", "軽微"):
-        raise LmStudioError(f"想定外のimportance値: {importance!r} (raw: {content!r})")
+        raise LlmError(f"想定外のimportance値: {importance!r} (raw: {result['content']!r})")
 
-    return {"importance": importance, "reason": reason, "elapsedSeconds": round(elapsed, 1)}
+    return {"importance": importance, "reason": reason, "elapsedSeconds": result["elapsedSeconds"]}
