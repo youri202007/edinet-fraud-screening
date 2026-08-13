@@ -117,7 +117,7 @@ python src/classify_amendments.py --limit 10 --thinking    # 思考モード
 ## 今後の拡張(ロードマップ)
 
 - Phase 1: 収集・一次スクリーニング(EDINET訂正報告書の日次取得) ← 完了
-- Phase 2: ローカルLLM(Qwen3, LM Studio)による訂正理由の一次分類(PDF本文抜粋ベース) ← 完了(10件で検証済み、101件への拡大待ち)
+- Phase 2: ローカルLLM(Qwen3, LM Studio)による訂正理由の一次分類(PDF本文抜粋ベース) ← 完了(101件全件、軽微65件・重要36件、失敗0件)
 - Phase 3: 監査基準・過去事例のRAG
 - Phase 4: kabu-dashboardへの統合
 - Phase 5: マルチエージェント協働
