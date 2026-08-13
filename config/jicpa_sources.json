@@ -1,7 +1,19 @@
 {
-  "_comment": "日本公認会計士協会(JICPA)の監査基準委員会報告書等の一覧。本文PDFはdata/knowledge_base/jicpa/にダウンロードし、著作物のためgitignore対象とする。ここに含むのは書誌情報(番号・タイトル・URL)のみ。",
-  "_source_page": "https://jicpa.or.jp/specialized_field/publication/kansa/",
+  "_comment": "日本公認会計士協会(JICPA)の監査基準委員会報告書等、および金融庁(FSA)のJ-SOX関連基準の一覧。本文PDFはdata/knowledge_base/jicpa/にダウンロードし、著作物のためgitignore対象とする。ここに含むのは書誌情報(番号・タイトル・URL)のみ。",
+  "_source_page": "https://jicpa.or.jp/specialized_field/publication/kansa/ (JICPA) / https://www.fsa.go.jp/ (FSA, J-SOX関連)",
   "documents": [
+    {
+      "id": "fsa_naibutousei_kijun",
+      "category": "金融庁(J-SOX)",
+      "title": "財務報告に係る内部統制の評価及び監査の基準・実施基準(2019年12月改訂版)",
+      "url": "https://www.fsa.go.jp/singi/singi_kigyou/kijun/20191206_naibutousei_kansa.pdf"
+    },
+    {
+      "id": "fsa_naibutousei_qa",
+      "category": "金融庁(J-SOX)",
+      "title": "内部統制報告制度に関するＱ＆Ａ(2023年8月31日改訂版)",
+      "url": "https://www.fsa.go.jp/news/r5/sonota/20230831-2/02.pdf"
+    },
     {
       "id": "jokan",
       "category": "序",

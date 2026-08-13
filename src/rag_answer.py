@@ -22,6 +22,21 @@ INTENT_SYSTEM_PROMPT = """あなたは会計監査支援システムの質問振
 {"intent": "case" または "standard"}
 """
 
+QUERY_EXPANSION_SYSTEM_PROMPT = """あなたは会計監査の検索クエリ拡張役です。
+ユーザーの質問(自然文)を、埋め込み検索(ベクトル検索)で関連文書がヒットしやすいよう、
+関連する専門用語を補った検索用テキストに展開してください。
+
+- 質問の意図は変えない。
+- 質問文中の言葉(例: 「サンプリング」「不備」)に加え、関連しそうな監査・内部統制の専門用語
+  (例: 統制の逸脱、許容逸脱率、信頼上限、UPL、逐次抜取サンプリング、代替的な監査手続、
+  J-SOX、業務プロセス、運用状況の評価、誤謬、虚偽表示 等、質問の文脈に応じて関連しそうなもの)
+  を自然な形で補い、30〜80文字程度の検索用テキストを1つ作る。
+- 質問が財務諸表監査(誤謬・虚偽表示)の文脈かJ-SOX内部統制評価(統制の逸脱)の文脈か
+  判断できる場合は、それに応じた語彙を優先する。判断できない場合は両方の語彙を含めてよい。
+
+出力は検索用テキストのみを1行で返す。説明・前置き・JSON等は不要。
+"""
+
 RERANK_SYSTEM_PROMPT = """あなたは検索結果の絞り込み役です。
 質問に対して、以下の候補(番号・出典・冒頭抜粋)の中から、質問に答えるために本当に役立ちそうな
 ものを最大{max_select}件選んでください。具体的な数値例・計算例・手続の詳細が書かれていそうな
@@ -35,15 +50,28 @@ STANDARD_ANSWER_SYSTEM_PROMPT = """あなたは経験豊富な監査実務家で
 渡された監査基準委員会報告書等の抜粋を根拠としながら、実務で使える分かりやすい説明をしてください。
 生の引用を切り貼りするのではなく、内容を咀嚼して自分の言葉で筋道立てて説明することが最も重要です。
 
+【用語の正確さについて】
+- 「統制の逸脱(deviation)」(内部統制評価・J-SOXの運用評価、属性サンプリングで扱う)と、
+  「誤謬・虚偽表示(misstatement)」(財務諸表監査の実証手続で扱う、金額ベース)は異なる概念であり、
+  質問がどちらの文脈かを抜粋から判断し、正しい用語で答える。両方の抜粋が混ざっている場合は、
+  それぞれ別の話であることを明示した上で、質問との関連が強い方を中心に説明する。
+- サンプリングリスクに触れる場合、「評価が過大/過小に傾く可能性がある」のような曖昧な言い方ではなく、
+  「観測されたサンプル内の逸脱率(または誤謬率)そのものではなく、そこから統計的に導かれる母集団の
+  逸脱率の上限(信頼上限、UPL)で判断する必要があり、その上限は観測値より高くなる」という統計的な
+  理屈を、抜粋に書かれている範囲で具体的に説明する。
+
 出力は次の構成にしてください。
 
 1. **考え方**: 質問への実務的な回答を、2〜4文程度でまず要約する。断定的な「絶対にこうすべき」ではなく、
    「基準の考え方に沿うと、一般的には〜という整理になります」といった、監査人としての判断の道筋を示す言い方にする。
+   抜粋に複数の選択肢(例: 追加サンプルの抽出、代替的な手続、不備として是正し再評価 等)が示唆されている場合は、
+   その分岐を簡潔に列挙する。
 2. **根拠**: 上記の考え方がどの基準のどの内容に基づくかを、抜粋の文言を踏まえつつ自分の言葉でかみ砕いて説明する。
    基準名は `(基準名)によれば〜` のように文中で自然に触れる。一言一句の引用ではなく要約でよい。
-   抜粋に具体的な数値例・計算例があれば、それがどういう場面向けの例かを説明した上で積極的に紹介する
-   (ただし、抜粋にない具体的な数値を新たに作り出してはならない)。
+   抜粋に具体的な数値例・計算例があれば、それがどういう前提(信頼度・許容逸脱率・母集団規模等)に基づく例かを
+   明示した上で積極的に紹介する(ただし、抜粋にない具体的な数値を新たに作り出してはならない)。
 3. **留意点**: 抜粋だけでは判断しきれない部分(状況依存の要素、抜粋に含まれない詳細な手続等)があれば触れる。
+   数値例が質問の前提(件数・信頼度等)と完全には一致しない場合は、その差異も指摘する。
 
 抜粋に書かれている内容の範囲を超えて、存在しない基準条文番号や数値を捏造してはいけない。
 ただし、監査の一般的な考え方(なぜサンプリングリスクという概念があるか、等)を使って抜粋の内容を
@@ -99,6 +127,28 @@ def classify_intent(question: str, config: AppConfig) -> Intent:
     parsed = _extract_json(result["content"])
     intent = parsed.get("intent")
     return "case" if intent == "case" else "standard"
+
+
+def expand_query(question: str, config: AppConfig) -> str:
+    """埋め込み検索用に、質問を関連専門用語で補ったテキストへ展開する。
+
+    ユーザーの自然文の質問(例:「25件中1件不備が出たら追加サンプルは必要か」)は、
+    監査基準の条文で使われる語彙(統制の逸脱、許容逸脱率、UPL等)とそのまま埋め込み類似度が
+    離れてしまうことがあるため、検索専用にクエリを拡張してから埋め込みベクトル検索にかける。
+    """
+    try:
+        result = chat_complete(
+            [
+                {"role": "system", "content": QUERY_EXPANSION_SYSTEM_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            config=config.llm,
+            max_tokens=200,
+        )
+        expanded = result["content"].strip().strip('"')
+        return expanded if expanded else question
+    except Exception:  # noqa: BLE001
+        return question
 
 
 def answer_case_query(question: str, config: AppConfig, *, top_k: int = 5) -> AnswerResult:
@@ -177,8 +227,10 @@ def answer_standard_query(
 ) -> AnswerResult:
     client = get_client(config.chroma)
     standards = get_collection(client, config.chroma.standards_collection)
+
+    search_text = expand_query(question, config)
     result = query(
-        standards, text=question, embedding_config=config.embedding, n_results=candidate_pool
+        standards, text=search_text, embedding_config=config.embedding, n_results=candidate_pool
     )
 
     candidates = [
