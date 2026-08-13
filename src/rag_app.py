@@ -38,34 +38,40 @@ if submitted:
     if not question.strip():
         st.warning("質問を入力してください。")
     else:
-        with st.spinner("質問の種類を判定しています..."):
+        # 進捗表示は単一の st.status コンテナに集約する。
+        # st.spinner/st.info を連続して出し入れすると、まれにStreamlitのReact描画側で
+        # 「insertBefore」DOMエラーが発生することがあるため(既知の描画バグ)、
+        # 計算中の動的な要素追加・削除を最小限に留めている。
+        with st.status("質問の種類を判定しています...", expanded=False) as status:
             intent = classify_intent(question, config)
+            if intent == "case":
+                status.update(label="類似事例を検索しています...")
+                result = answer_case_query(question, config)
+            else:
+                status.update(label="関連する基準を検索し、回答を生成しています...")
+                result = answer_standard_query(question, config)
+            status.update(label="完了", state="complete")
 
         if intent == "case":
             st.info("🔍 過去事例の照会として回答します。")
-            with st.spinner("類似事例を検索しています..."):
-                result = answer_case_query(question, config)
-
-            st.markdown(result.answer_text)
-            if result.case_hits:
-                with st.expander("検索結果の詳細"):
-                    for h in result.case_hits:
-                        st.markdown(
-                            f"- **{h.importance}** {h.filer_name} / {h.doc_description} "
-                            f"— {h.reason} (`{h.doc_id}`, 距離={h.distance:.3f})"
-                        )
         else:
             st.info("📖 監査基準の参照として回答します。")
-            with st.spinner("関連する基準を検索し、回答を生成しています..."):
-                result = answer_standard_query(question, config)
 
-            st.markdown(result.answer_text)
-            if result.standard_sources:
-                with st.expander("参照した基準の抜粋"):
-                    for s in result.standard_sources:
-                        st.markdown(f"**{s.title}** (距離={s.distance:.3f})")
-                        st.text(s.excerpt[:500])
-                        st.markdown("---")
+        st.markdown(result.answer_text)
+
+        if result.case_hits:
+            with st.expander("検索結果の詳細"):
+                for h in result.case_hits:
+                    st.markdown(
+                        f"- **{h.importance}** {h.filer_name} / {h.doc_description} "
+                        f"— {h.reason} (`{h.doc_id}`, 距離={h.distance:.3f})"
+                    )
+        if result.standard_sources:
+            with st.expander("参照した基準の抜粋"):
+                for s in result.standard_sources:
+                    st.markdown(f"**{s.title}** (距離={s.distance:.3f})")
+                    st.text(s.excerpt[:500])
+                    st.markdown("---")
 
 st.divider()
 st.caption(
