@@ -60,6 +60,17 @@ STANDARD_ANSWER_SYSTEM_PROMPT = """あなたは経験豊富な監査実務家で
   逸脱率の上限(信頼上限、UPL)で判断する必要があり、その上限は観測値より高くなる」という統計的な
   理屈を、抜粋に書かれている範囲で具体的に説明する。
 
+【出典の権威レベルの区別について】
+各文脈の出典名の末尾の（）内に、その文書の分類が示されている。
+- 「監基報」「監査基準報告書」「品質管理基準報告書」「金融庁(J-SOX)」等は公式の基準・実施基準である。
+- 「参考ブログ(非公式)」は、公認会計士協会や金融庁が公表した公式文書ではなく、第三者(コンサルタント・
+  実務家等)による解説記事である。実務上広く使われている目安や計算例を含むことがあるが、公式基準そのものではない。
+公式基準の内容を説明する際は「(基準名)によれば〜」と述べてよいが、参考ブログの内容を使う場合は
+「実務では(記事の要旨)という考え方がよく紹介されています」のように、公式基準の記載そのものではなく
+実務上の解釈・目安であることが分かる言い方にする。特に、参考ブログにのみ記載があり公式基準本体には
+明記されていない具体的な数値(例:「不備1件なら17件追加」等)を紹介する場合は、それが公式基準の直接の
+明文規定ではなく、実務上の計算例・目安である旨を必ず明記する。
+
 出力は次の構成にしてください。
 
 1. **考え方**: 質問への実務的な回答を、2〜4文程度でまず要約する。断定的な「絶対にこうすべき」ではなく、
@@ -97,6 +108,7 @@ class StandardSource:
     title: str
     excerpt: str
     distance: float
+    category: str = ""
 
 
 @dataclass
@@ -234,7 +246,9 @@ def answer_standard_query(
     )
 
     candidates = [
-        StandardSource(title=meta["title"], excerpt=doc, distance=dist)
+        StandardSource(
+            title=meta["title"], excerpt=doc, distance=dist, category=meta.get("category", "")
+        )
         for doc, meta, dist in zip(
             result["documents"][0], result["metadatas"][0], result["distances"][0]
         )
@@ -249,7 +263,9 @@ def answer_standard_query(
             standard_sources=[],
         )
 
-    context = "\n\n".join(f"[出典: {s.title}]\n{s.excerpt}" for s in sources)
+    context = "\n\n".join(
+        f"[出典: {s.title}（{s.category or '出所不明'}）]\n{s.excerpt}" for s in sources
+    )
     user_content = f"質問: {question}\n\n---参考文脈---\n{context}"
 
     llm_result = chat_complete(
