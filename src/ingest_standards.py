@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app_config import load_config
 from doc_text import extract_text
 from text_chunker import chunk_text
-from vector_store import get_client, get_collection, upsert
+from vector_store import get_client, reset_collection, upsert
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES_PATH = ROOT / "config" / "jicpa_sources.json"
@@ -26,7 +26,8 @@ def main() -> int:
     sources = {d["id"]: d for d in json.loads(SOURCES_PATH.read_text(encoding="utf-8"))["documents"]}
 
     client = get_client(config.chroma)
-    collection = get_collection(client, config.chroma.standards_collection)
+    # チャンク方式(サイズ)を変更したときにチャンク数がずれて古いチャンクが残らないよう、毎回作り直す
+    collection = reset_collection(client, config.chroma.standards_collection)
 
     pdf_paths = sorted(PDF_DIR.glob("*.pdf"))
     if not pdf_paths:
@@ -41,7 +42,7 @@ def main() -> int:
         category = meta.get("category", "")
 
         text = extract_text(pdf_path.read_bytes(), max_pages=9999)
-        chunks = chunk_text(text, chunk_size=800, overlap=150)
+        chunks = chunk_text(text, chunk_size=1500, overlap=250)
         if not chunks:
             print(f"  ({i}/{len(pdf_paths)}) [skip] {doc_id}: テキスト抽出結果が空")
             continue

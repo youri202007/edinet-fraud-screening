@@ -23,6 +23,15 @@ def get_collection(client: chromadb.ClientAPI, name: str):
     return client.get_or_create_collection(name=name, embedding_function=None)
 
 
+def reset_collection(client: chromadb.ClientAPI, name: str):
+    """コレクションを削除してから作り直す(チャンク方式を変更して再構築する場合に使用)。"""
+    try:
+        client.delete_collection(name=name)
+    except Exception:  # noqa: BLE001
+        pass
+    return get_collection(client, name)
+
+
 def upsert(
     collection,
     *,
