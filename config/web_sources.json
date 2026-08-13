@@ -1,0 +1,35 @@
+{
+  "_comment": "監査実務系ブログ・解説記事。JICPA/FSAの公式基準ではなく第三者による実務解釈・まとめ記事のため、standardsコレクションには category=\"参考ブログ(非公式)\" として投入し、回答生成時に公式基準と明確に区別する。本文キャッシュはdata/knowledge_base/web/に保存し、著作物のためgitignore対象。",
+  "documents": [
+    {
+      "id": "aimc_p1823",
+      "category": "参考ブログ(非公式)",
+      "title": "手元に置きたい評価マニュアル～業務プロセス統制の運用状況評価方法(エイアイエムコンサルティング)",
+      "url": "https://www.aimc.co.jp/blog/p-1823/"
+    },
+    {
+      "id": "kogures_sampling",
+      "category": "参考ブログ(非公式)",
+      "title": "監査とサンプリング(法規・基準)(小暮仁)",
+      "url": "https://www.kogures.com/hitoshi/webtext/std-kansa-sampling/index.html"
+    },
+    {
+      "id": "note_domonjo01",
+      "category": "参考ブログ(非公式)",
+      "title": "ITGCの運用状況評価のサンプリング完全ガイド(SOC報告書ラボ)",
+      "url": "https://note.com/domonjo01/n/nbb3af1911b98"
+    },
+    {
+      "id": "note_nfsq",
+      "category": "参考ブログ(非公式)",
+      "title": "【内部統制評価】「25件テストでエラーが出た」ってどういう意味？(NFSQ)",
+      "url": "https://note.com/nfsq/n/n096bbda6da01"
+    },
+    {
+      "id": "jsoxnavi_bp2",
+      "category": "参考ブログ(非公式)",
+      "title": "業務プロセスのポイント②整備・運用状況の有効性評価(内部統制ツール比較・選び方ナビ)",
+      "url": "https://jsoxnavi.com/business-process-documentation-2/"
+    }
+  ]
+}
