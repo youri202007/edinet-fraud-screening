@@ -22,6 +22,15 @@ INTENT_SYSTEM_PROMPT = """あなたは会計監査支援システムの質問振
 {"intent": "case" または "standard"}
 """
 
+RERANK_SYSTEM_PROMPT = """あなたは検索結果の絞り込み役です。
+質問に対して、以下の候補(番号・出典・冒頭抜粋)の中から、質問に答えるために本当に役立ちそうな
+ものを最大{max_select}件選んでください。具体的な数値例・計算例・手続の詳細が書かれていそうな
+候補を優先してください。表面的にキーワードが似ているだけで内容が無関係なものは選ばないでください。
+
+出力は必ず次のJSON形式のみで返してください。
+{{"selected": [番号, 番号, ...]}}
+"""
+
 STANDARD_ANSWER_SYSTEM_PROMPT = """あなたは会計監査の実務相談に対して、監査基準委員会報告書等の該当箇所を
 示しながら回答するアシスタントです。以下のルールを厳守してください。
 
@@ -112,17 +121,64 @@ def answer_case_query(question: str, config: AppConfig, *, top_k: int = 5) -> An
     return AnswerResult(intent="case", answer_text=text, case_hits=hits)
 
 
-def answer_standard_query(question: str, config: AppConfig, *, top_k: int = 5) -> AnswerResult:
+def _rerank_candidates(
+    question: str,
+    candidates: list[StandardSource],
+    config: AppConfig,
+    *,
+    max_select: int,
+    snippet_chars: int = 220,
+) -> list[StandardSource]:
+    """候補を短い抜粋のみでLLMに見せ、本当に関連しそうなものだけ選び直す。
+
+    候補プール全体(top_kを広く取った状態)は8192トークン制限に収まらないことが多いため、
+    まず短い要約だけで安価に絞り込んでから、選ばれたものだけ全文を最終回答生成に使う。
+    """
+    if not candidates:
+        return []
+
+    listing = "\n\n".join(
+        f"[{i}] 出典: {c.title}\n{c.excerpt[:snippet_chars]}" for i, c in enumerate(candidates)
+    )
+    prompt = RERANK_SYSTEM_PROMPT.format(max_select=max_select)
+    result = chat_complete(
+        [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": f"質問: {question}\n\n---候補---\n{listing}"},
+        ],
+        config=config.llm,
+        max_tokens=300,
+    )
+    try:
+        selected_idx = _extract_json(result["content"]).get("selected", [])
+    except ValueError:
+        selected_idx = []
+
+    selected = [candidates[i] for i in selected_idx if isinstance(i, int) and 0 <= i < len(candidates)]
+    return selected[:max_select] if selected else candidates[:max_select]
+
+
+def answer_standard_query(
+    question: str,
+    config: AppConfig,
+    *,
+    top_k: int = 5,
+    candidate_pool: int = 25,
+) -> AnswerResult:
     client = get_client(config.chroma)
     standards = get_collection(client, config.chroma.standards_collection)
-    result = query(standards, text=question, embedding_config=config.embedding, n_results=top_k)
+    result = query(
+        standards, text=question, embedding_config=config.embedding, n_results=candidate_pool
+    )
 
-    sources = [
+    candidates = [
         StandardSource(title=meta["title"], excerpt=doc, distance=dist)
         for doc, meta, dist in zip(
             result["documents"][0], result["metadatas"][0], result["distances"][0]
         )
     ]
+
+    sources = _rerank_candidates(question, candidates, config, max_select=top_k)
 
     if not sources:
         return AnswerResult(
@@ -140,7 +196,7 @@ def answer_standard_query(question: str, config: AppConfig, *, top_k: int = 5) -
             {"role": "user", "content": user_content},
         ],
         config=config.llm,
-        max_tokens=1500,
+        max_tokens=1200,
     )
 
     return AnswerResult(
